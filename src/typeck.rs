@@ -120,7 +120,7 @@ pub fn check_expr<'a, 'b>(
                                 }
                                 ne
                             } else {
-                                (**apply_target).clone()
+                                apply_target.clone()
                             };
                             match *expr.body {
                                 ExprBody::Abstract { ref body, .. } => match *body {

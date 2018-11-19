@@ -22,7 +22,7 @@ pub enum ExprBody<'a> {
     Const(ConstExpr),
     Name(Cow<'a, str>),
     Apply {
-        target: Box<Expr<'a>>,
+        target: Expr<'a>,
         params: Vec<Expr<'a>>,
     },
     Abstract {
@@ -30,7 +30,7 @@ pub enum ExprBody<'a> {
         body: AbstractBody<'a>,
     },
     Match {
-        value: Box<Expr<'a>>,
+        value: Expr<'a>,
         branches: Vec<(Cow<'a, str>, Expr<'a>)>,
     },
     Never,
@@ -39,7 +39,7 @@ pub enum ExprBody<'a> {
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum AbstractBody<'a> {
     Host(Cow<'a, str>),
-    Expr(Box<Expr<'a>>),
+    Expr(Expr<'a>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]

@@ -1,5 +1,6 @@
 use crate::builtin::ValueType;
 use std::borrow::Cow;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum DataType<'a> {
@@ -7,12 +8,13 @@ pub enum DataType<'a> {
     Sum(Vec<(Cow<'a, str>, DataType<'a>)>),
     Product(Vec<(Cow<'a, str>, DataType<'a>)>),
     FunctionDecl { params: Vec<Cow<'a, str>> },
+    Divergent,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Expr<'a> {
     #[serde(flatten)]
-    pub body: ExprBody<'a>,
+    pub body: Rc<ExprBody<'a>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -31,6 +33,7 @@ pub enum ExprBody<'a> {
         value: Box<Expr<'a>>,
         branches: Vec<(Cow<'a, str>, Expr<'a>)>,
     },
+    Never,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]

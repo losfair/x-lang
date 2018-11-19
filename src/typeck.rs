@@ -3,11 +3,18 @@ use crate::builtin::ValueType;
 use crate::error::TypeError;
 use crate::host::HostFunction;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+
+fn never_expr<'a>() -> Expr<'a> {
+    Expr {
+        body: Rc::new(ExprBody::Never),
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct TypeResolveState<'a, 'b> {
-    subs: BTreeMap<Cow<'a, str>, DataType<'a>>,
+    subs: BTreeMap<Cow<'a, str>, (DataType<'a>, Expr<'a>)>,
     host_functions: BTreeMap<Cow<'a, str>, &'b dyn HostFunction>,
 }
 
@@ -19,12 +26,34 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
         self.host_functions.extend(host_functions);
     }
 
+    pub fn resolve_name(&self, mut name: Cow<'a, str>) -> Option<(DataType<'a>, Expr<'a>)> {
+        let mut path: BTreeSet<Cow<'a, str>> = BTreeSet::new();
+
+        loop {
+            if path.contains(&name) {
+                return Some((DataType::Divergent, never_expr()));
+            }
+            path.insert(name.clone());
+
+            let (dt, expr) = if let Some(v) = self.subs.get(&name).cloned() {
+                v
+            } else {
+                return None;
+            };
+            if let ExprBody::Name(ref n) = *expr.body {
+                name = n.clone();
+            } else {
+                return Some((dt, expr));
+            }
+        }
+    }
+
     pub fn with_resolved<T, F: FnOnce(&mut Self) -> T>(
         &mut self,
-        pairs: &[(Cow<'a, str>, DataType<'a>)],
+        pairs: &[(Cow<'a, str>, (DataType<'a>, Expr<'a>))],
         callback: F,
     ) -> T {
-        let old: Vec<(&Cow<'a, str>, Option<DataType<'a>>)> = pairs
+        let old: Vec<(&Cow<'a, str>, Option<(DataType<'a>, Expr<'a>)>)> = pairs
             .iter()
             .map(|(k, _)| (k, self.subs.get(k).cloned()))
             .collect();
@@ -44,21 +73,21 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
 }
 
 pub fn check_expr<'a, 'b>(
-    e: &mut Expr<'a>,
+    e: &Expr<'a>,
     trs: &mut TypeResolveState<'a, 'b>,
 ) -> Result<DataType<'a>, TypeError> {
-    match e.body {
+    match *e.body {
         ExprBody::Const(ref c) => Ok(match *c {
             ConstExpr::Int(_) => DataType::Value(ValueType::Int),
             ConstExpr::Bool(_) => DataType::Value(ValueType::Bool),
         }),
-        ExprBody::Name(ref name) => match trs.subs.get(name) {
-            Some(v) => Ok(v.clone()),
-            None => Err(TypeError::Custom("undefined name".into())),
+        ExprBody::Name(ref name) => match trs.resolve_name(name.clone()) {
+            Some((dt, _)) => Ok(dt),
+            None => Err(TypeError::Custom("cannot resolve name".into())),
         },
         ExprBody::Apply {
-            ref mut target,
-            ref mut params,
+            ref target,
+            ref params,
         } => {
             let target_ty = check_expr(target, trs)?;
             let apply_target = target;
@@ -67,17 +96,34 @@ pub fn check_expr<'a, 'b>(
             match target_ty {
                 DataType::FunctionDecl { ref params } => {
                     if params.len() == apply_params.len() {
-                        let mut resolved: Vec<(Cow<'a, str>, DataType<'a>)> = Vec::new();
+                        let mut resolved: Vec<(
+                            Cow<'a, str>,
+                            (DataType<'a>, Expr<'a>),
+                        )> = Vec::new();
                         let mut param_types: Vec<DataType<'a>> = Vec::new();
 
                         for i in 0..params.len() {
-                            let param_ty = check_expr(&mut apply_params[i], trs)?;
+                            let param_ty = check_expr(&apply_params[i], trs)?;
                             param_types.push(param_ty.clone());
-                            resolved.push((params[i].clone(), param_ty));
+                            resolved.push((params[i].clone(), (param_ty, apply_params[i].clone())));
                         }
-                        Ok(
-                            trs.with_resolved(resolved.as_ref(), |trs| match apply_target.body {
-                                ExprBody::Abstract { ref mut body, .. } => match *body {
+                        Ok(trs.with_resolved(resolved.as_ref(), |trs| {
+                            let expr = if let ExprBody::Name(ref n) = *apply_target.body {
+                                let (dt, ne) = match trs.resolve_name(n.clone()) {
+                                    Some(v) => v,
+                                    None => {
+                                        return Err(TypeError::Custom("cannot resolve name".into()))
+                                    }
+                                };
+                                if dt == DataType::Divergent {
+                                    return Ok(DataType::Divergent);
+                                }
+                                ne
+                            } else {
+                                (**apply_target).clone()
+                            };
+                            match *expr.body {
+                                ExprBody::Abstract { ref body, .. } => match *body {
                                     AbstractBody::Host(ref host) => {
                                         if let Some(ref host) =
                                             trs.host_functions.get(host.as_ref())
@@ -87,11 +133,14 @@ pub fn check_expr<'a, 'b>(
                                             Err(TypeError::Custom("host function not found".into()))
                                         }
                                     }
-                                    AbstractBody::Expr(ref mut e) => check_expr(e, trs),
+                                    AbstractBody::Expr(ref e) => check_expr(e, trs),
                                 },
-                                _ => panic!("bug: got FunctionDecl but expr is not Abstract"),
-                            })?,
-                        )
+                                _ => Err(TypeError::Custom(format!(
+                                    "got FunctionDecl but expr is not Abstract or Name: {:?}",
+                                    apply_target
+                                ))),
+                            }
+                        })?)
                     } else {
                         Err(TypeError::Custom("param count mismatch".into()))
                     }
@@ -113,5 +162,6 @@ pub fn check_expr<'a, 'b>(
         ExprBody::Match { .. } => {
             unimplemented!();
         }
+        ExprBody::Never => Err(TypeError::Custom("unexpected never expr".into())),
     }
 }

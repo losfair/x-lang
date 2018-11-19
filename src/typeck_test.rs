@@ -4,6 +4,7 @@ use crate::error::*;
 use crate::host::*;
 use crate::typeck::*;
 use std::borrow::Cow;
+use std::rc::Rc;
 
 #[derive(Debug)]
 struct NotFunction {}
@@ -21,29 +22,29 @@ impl HostFunction for NotFunction {
 #[test]
 fn test_typeck() {
     let mut e = Expr {
-        body: ExprBody::Apply {
-            target: Box::new(Expr {
-                body: ExprBody::Abstract {
+        body: Rc::new(ExprBody::Apply {
+            target: Expr {
+                body: Rc::new(ExprBody::Abstract {
                     params: vec![Cow::Borrowed("a")],
-                    body: AbstractBody::Expr(Box::new(Expr {
-                        body: ExprBody::Apply {
-                            target: Box::new(Expr {
-                                body: ExprBody::Abstract {
+                    body: AbstractBody::Expr(Expr {
+                        body: Rc::new(ExprBody::Apply {
+                            target: Expr {
+                                body: Rc::new(ExprBody::Abstract {
                                     params: vec![Cow::Borrowed("value")], // unused
                                     body: AbstractBody::Host(Cow::Borrowed("not")),
-                                },
-                            }),
+                                }),
+                            },
                             params: vec![Expr {
-                                body: ExprBody::Name(Cow::Borrowed("a")),
+                                body: Rc::new(ExprBody::Name(Cow::Borrowed("a"))),
                             }],
-                        },
-                    })),
-                },
-            }),
+                        }),
+                    }),
+                }),
+            },
             params: vec![Expr {
-                body: ExprBody::Const(ConstExpr::Bool(false)),
+                body: Rc::new(ExprBody::Const(ConstExpr::Bool(false))),
             }],
-        },
+        }),
     };
 
     let not_f = NotFunction {};

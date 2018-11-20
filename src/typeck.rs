@@ -15,7 +15,7 @@ fn never_expr<'a>() -> Expr<'a> {
 
 #[derive(Debug, Default)]
 pub struct TypeResolveState<'a, 'b> {
-    subs: BTreeMap<Cow<'a, str>, (DataType<'a>, Expr<'a>)>,
+    subs: BTreeMap<Cow<'a, str>, Expr<'a>>,
     host_functions: BTreeMap<Cow<'a, str>, &'b dyn HostFunction>,
     expr_reach: Rc<RefCell<BTreeSet<*const ExprBody<'a>>>>,
 }
@@ -56,16 +56,16 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
         self.host_functions.extend(host_functions);
     }
 
-    pub fn resolve_name(&self, mut name: Cow<'a, str>) -> Option<(DataType<'a>, Expr<'a>)> {
+    pub fn resolve_name(&self, mut name: Cow<'a, str>) -> Option<Expr<'a>> {
         let mut path: BTreeSet<Cow<'a, str>> = BTreeSet::new();
 
         loop {
             if path.contains(&name) {
-                return Some((DataType::Divergent, never_expr()));
+                return Some(never_expr());
             }
             path.insert(name.clone());
 
-            let (dt, expr) = if let Some(v) = self.subs.get(&name).cloned() {
+            let expr = if let Some(v) = self.subs.get(&name).cloned() {
                 v
             } else {
                 return None;
@@ -73,17 +73,17 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
             if let ExprBody::Name(ref n) = *expr.body {
                 name = n.clone();
             } else {
-                return Some((dt, expr));
+                return Some(expr);
             }
         }
     }
 
     pub fn with_resolved<T, F: FnOnce(&mut Self) -> T>(
         &mut self,
-        pairs: &[(Cow<'a, str>, (DataType<'a>, Expr<'a>))],
+        pairs: &[(Cow<'a, str>, Expr<'a>)],
         callback: F,
     ) -> T {
-        let old: Vec<(&Cow<'a, str>, Option<(DataType<'a>, Expr<'a>)>)> = pairs
+        let old: Vec<(&Cow<'a, str>, Option<Expr<'a>>)> = pairs
             .iter()
             .map(|(k, _)| (k, self.subs.get(k).cloned()))
             .collect();
@@ -112,8 +112,8 @@ pub fn check_expr<'a, 'b>(
     };
     match *e.body {
         ExprBody::Name(ref name) => match trs.resolve_name(name.clone()) {
-            Some((dt, e)) => {
-                if dt == DataType::Divergent {
+            Some(e) => {
+                if *e.body == ExprBody::Never {
                     Ok(DataType::Divergent)
                 } else {
                     check_expr(&e, trs)
@@ -131,8 +131,8 @@ pub fn check_expr<'a, 'b>(
         } => {
             let apply_target = if let ExprBody::Name(ref name) = *target.body {
                 match trs.resolve_name(name.clone()) {
-                    Some((dt, e)) => {
-                        if dt == DataType::Divergent {
+                    Some(e) => {
+                        if *e.body == ExprBody::Never {
                             return Ok(DataType::Divergent);
                         } else {
                             e
@@ -153,16 +153,13 @@ pub fn check_expr<'a, 'b>(
                     ref param_set,
                 } => {
                     if params.len() == apply_params.len() {
-                        let mut resolved: Vec<(
-                            Cow<'a, str>,
-                            (DataType<'a>, Expr<'a>),
-                        )> = Vec::new();
+                        let mut resolved: Vec<(Cow<'a, str>, Expr<'a>)> = Vec::new();
                         let mut param_types: Vec<DataType<'a>> = Vec::new();
 
                         for i in 0..params.len() {
                             let param_ty = check_expr(&apply_params[i], trs)?;
                             param_types.push(param_ty.clone());
-                            resolved.push((params[i].clone(), (param_ty, apply_params[i].clone())));
+                            resolved.push((params[i].clone(), apply_params[i].clone()));
                         }
 
                         match *decl_expr.body {

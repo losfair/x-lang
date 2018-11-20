@@ -11,7 +11,7 @@ pub enum DataType<'a> {
     FunctionDecl {
         params: Vec<Cow<'a, str>>,
         decl_expr: Expr<'a>,
-        param_set: BTreeMap<Cow<'a, str>, (DataType<'a>, Expr<'a>)>,
+        param_set: BTreeMap<Cow<'a, str>, Expr<'a>>,
     },
     Divergent,
 }

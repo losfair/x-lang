@@ -5,6 +5,7 @@ extern crate serde_json;
 
 pub mod ast;
 pub mod builtin;
+pub mod corelib;
 pub mod error;
 pub mod host;
 pub mod typeck;

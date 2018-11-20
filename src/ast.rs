@@ -1,5 +1,6 @@
 use crate::builtin::ValueType;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -7,7 +8,11 @@ pub enum DataType<'a> {
     Value(ValueType),
     Sum(Vec<(Cow<'a, str>, DataType<'a>)>),
     Product(Vec<(Cow<'a, str>, DataType<'a>)>),
-    FunctionDecl { params: Vec<Cow<'a, str>> },
+    FunctionDecl {
+        params: Vec<Cow<'a, str>>,
+        decl_expr: Expr<'a>,
+        param_set: BTreeMap<Cow<'a, str>, (DataType<'a>, Expr<'a>)>,
+    },
     Divergent,
 }
 

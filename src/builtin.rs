@@ -2,4 +2,5 @@
 pub enum ValueType {
     Int,
     Bool,
+    Float,
 }

@@ -3,6 +3,7 @@ use crate::builtin::ValueType;
 use crate::error::TypeError;
 use crate::host::HostFunction;
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
@@ -16,9 +17,38 @@ fn never_expr<'a>() -> Expr<'a> {
 pub struct TypeResolveState<'a, 'b> {
     subs: BTreeMap<Cow<'a, str>, (DataType<'a>, Expr<'a>)>,
     host_functions: BTreeMap<Cow<'a, str>, &'b dyn HostFunction>,
+    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody<'a>>>>,
+}
+
+pub struct ExprReachGuard<'a> {
+    me: *const ExprBody<'a>,
+    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody<'a>>>>,
+}
+
+impl<'a> Drop for ExprReachGuard<'a> {
+    fn drop(&mut self) {
+        if self.expr_reach.borrow_mut().remove(&self.me) == false {
+            panic!("erg: not found");
+        }
+    }
 }
 
 impl<'a, 'b> TypeResolveState<'a, 'b> {
+    fn guarded_expr_reach(&self, e: &Expr<'a>) -> Option<ExprReachGuard<'a>> {
+        let b: *const ExprBody<'a> = &*e.body;
+
+        let mut reach = self.expr_reach.borrow_mut();
+        if reach.contains(&b) {
+            None
+        } else {
+            reach.insert(b);
+            Some(ExprReachGuard {
+                me: b,
+                expr_reach: self.expr_reach.clone(),
+            })
+        }
+    }
+
     pub fn add_hosts<H: IntoIterator<Item = (Cow<'a, str>, &'b dyn HostFunction)>>(
         &mut self,
         host_functions: H,
@@ -76,25 +106,52 @@ pub fn check_expr<'a, 'b>(
     e: &Expr<'a>,
     trs: &mut TypeResolveState<'a, 'b>,
 ) -> Result<DataType<'a>, TypeError> {
+    let _guard = match trs.guarded_expr_reach(e) {
+        Some(v) => v,
+        None => return Ok(DataType::Divergent),
+    };
     match *e.body {
+        ExprBody::Name(ref name) => match trs.resolve_name(name.clone()) {
+            Some((dt, e)) => {
+                if dt == DataType::Divergent {
+                    Ok(DataType::Divergent)
+                } else {
+                    check_expr(&e, trs)
+                }
+            }
+            None => Err(TypeError::Custom("cannot resolve name".into())),
+        },
         ExprBody::Const(ref c) => Ok(match *c {
             ConstExpr::Int(_) => DataType::Value(ValueType::Int),
             ConstExpr::Bool(_) => DataType::Value(ValueType::Bool),
         }),
-        ExprBody::Name(ref name) => match trs.resolve_name(name.clone()) {
-            Some((dt, _)) => Ok(dt),
-            None => Err(TypeError::Custom("cannot resolve name".into())),
-        },
         ExprBody::Apply {
             ref target,
             ref params,
         } => {
-            let target_ty = check_expr(target, trs)?;
-            let apply_target = target;
+            let apply_target = if let ExprBody::Name(ref name) = *target.body {
+                match trs.resolve_name(name.clone()) {
+                    Some((dt, e)) => {
+                        if dt == DataType::Divergent {
+                            return Ok(DataType::Divergent);
+                        } else {
+                            e
+                        }
+                    }
+                    None => return Err(TypeError::Custom("cannot resolve name".into())),
+                }
+            } else {
+                target.clone()
+            };
+            let target_ty = check_expr(&apply_target, trs)?;
             let apply_params = params;
 
             match target_ty {
-                DataType::FunctionDecl { ref params } => {
+                DataType::FunctionDecl {
+                    ref params,
+                    ref decl_expr,
+                    ref param_set,
+                } => {
                     if params.len() == apply_params.len() {
                         let mut resolved: Vec<(
                             Cow<'a, str>,
@@ -107,40 +164,30 @@ pub fn check_expr<'a, 'b>(
                             param_types.push(param_ty.clone());
                             resolved.push((params[i].clone(), (param_ty, apply_params[i].clone())));
                         }
-                        Ok(trs.with_resolved(resolved.as_ref(), |trs| {
-                            let expr = if let ExprBody::Name(ref n) = *apply_target.body {
-                                let (dt, ne) = match trs.resolve_name(n.clone()) {
-                                    Some(v) => v,
-                                    None => {
-                                        return Err(TypeError::Custom("cannot resolve name".into()))
+
+                        match *decl_expr.body {
+                            ExprBody::Abstract { ref body, .. } => match *body {
+                                AbstractBody::Host(ref host) => {
+                                    if let Some(ref host) = trs.host_functions.get(host.as_ref()) {
+                                        Ok(host.typeck(&param_types)?)
+                                    } else {
+                                        Err(TypeError::Custom("host function not found".into()))
                                     }
-                                };
-                                if dt == DataType::Divergent {
-                                    return Ok(DataType::Divergent);
                                 }
-                                ne
-                            } else {
-                                apply_target.clone()
-                            };
-                            match *expr.body {
-                                ExprBody::Abstract { ref body, .. } => match *body {
-                                    AbstractBody::Host(ref host) => {
-                                        if let Some(ref host) =
-                                            trs.host_functions.get(host.as_ref())
-                                        {
-                                            Ok(host.typeck(&param_types)?)
-                                        } else {
-                                            Err(TypeError::Custom("host function not found".into()))
-                                        }
-                                    }
-                                    AbstractBody::Expr(ref e) => check_expr(e, trs),
-                                },
-                                _ => Err(TypeError::Custom(format!(
-                                    "got FunctionDecl but expr is not Abstract or Name: {:?}",
-                                    apply_target
-                                ))),
-                            }
-                        })?)
+                                AbstractBody::Expr(ref e) => {
+                                    let mut new_subs = param_set.clone();
+                                    ::std::mem::swap(&mut new_subs, &mut trs.subs);
+
+                                    let ret = trs
+                                        .with_resolved(resolved.as_ref(), |trs| check_expr(e, trs));
+
+                                    ::std::mem::swap(&mut new_subs, &mut trs.subs);
+
+                                    Ok(ret?)
+                                }
+                            },
+                            _ => panic!("invalid decl expr"),
+                        }
                     } else {
                         Err(TypeError::Custom("param count mismatch".into()))
                     }
@@ -158,6 +205,8 @@ pub fn check_expr<'a, 'b>(
         }
         ExprBody::Abstract { ref params, .. } => Ok(DataType::FunctionDecl {
             params: params.clone(),
+            decl_expr: e.clone(),
+            param_set: trs.subs.clone(),
         }),
         ExprBody::Match { .. } => {
             unimplemented!();

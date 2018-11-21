@@ -6,6 +6,7 @@ pub enum ParseError {
     UnexpectedEnd,
     ExpectingExprBegin,
     ExpectingExprBody,
+    BracketMismatch,
     Custom(String),
 }
 

@@ -107,7 +107,7 @@ pub fn check_expr<'a, 'b>(
     trs: &mut TypeResolveState<'a, 'b>,
 ) -> Result<DataType<'a>, TypeError> {
     let ret = _check_expr(e, trs);
-    println!("CHECK {:?}, RESULT = {:?}", e, ret);
+    //println!("CHECK {:?}, RESULT = {:?}", e, ret);
     ret
 }
 
@@ -174,7 +174,10 @@ pub fn _check_expr<'a, 'b>(
                                 if let Some(ref host) = trs.host_functions.get(host.as_ref()) {
                                     Ok(host.typeck(&param_types)?)
                                 } else {
-                                    Err(TypeError::Custom("host function not found".into()))
+                                    Err(TypeError::Custom(format!(
+                                        "host function not found: {}",
+                                        host
+                                    )))
                                 }
                             }
                             AbstractBody::Expr(ref e) => {

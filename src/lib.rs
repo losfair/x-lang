@@ -8,6 +8,7 @@ pub mod builtin;
 pub mod corelib;
 pub mod error;
 pub mod host;
+pub mod parser;
 pub mod typeck;
 
 #[cfg(test)]

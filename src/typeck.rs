@@ -106,6 +106,15 @@ pub fn check_expr<'a, 'b>(
     e: &Expr<'a>,
     trs: &mut TypeResolveState<'a, 'b>,
 ) -> Result<DataType<'a>, TypeError> {
+    let ret = _check_expr(e, trs);
+    println!("CHECK {:?}, RESULT = {:?}", e, ret);
+    ret
+}
+
+pub fn _check_expr<'a, 'b>(
+    e: &Expr<'a>,
+    trs: &mut TypeResolveState<'a, 'b>,
+) -> Result<DataType<'a>, TypeError> {
     let _guard = match trs.guarded_expr_reach(e) {
         Some(v) => v,
         None => return Ok(DataType::Divergent),
@@ -152,26 +161,33 @@ pub fn check_expr<'a, 'b>(
                     ref decl_expr,
                     ref param_set,
                 } => {
-                    if params.len() == apply_params.len() {
-                        let mut resolved: Vec<(Cow<'a, str>, Expr<'a>)> = Vec::new();
-                        let mut param_types: Vec<DataType<'a>> = Vec::new();
+                    let mut param_types: Vec<DataType<'a>> = Vec::new();
 
-                        for i in 0..params.len() {
-                            let param_ty = check_expr(&apply_params[i], trs)?;
-                            param_types.push(param_ty.clone());
-                            resolved.push((params[i].clone(), apply_params[i].clone()));
-                        }
+                    for i in 0..apply_params.len() {
+                        let param_ty = check_expr(&apply_params[i], trs)?;
+                        param_types.push(param_ty.clone());
+                    }
 
-                        match *decl_expr.body {
-                            ExprBody::Abstract { ref body, .. } => match *body {
-                                AbstractBody::Host(ref host) => {
-                                    if let Some(ref host) = trs.host_functions.get(host.as_ref()) {
-                                        Ok(host.typeck(&param_types)?)
-                                    } else {
-                                        Err(TypeError::Custom("host function not found".into()))
-                                    }
+                    match *decl_expr.body {
+                        ExprBody::Abstract { ref body, .. } => match *body {
+                            AbstractBody::Host(ref host) => {
+                                if let Some(ref host) = trs.host_functions.get(host.as_ref()) {
+                                    Ok(host.typeck(&param_types)?)
+                                } else {
+                                    Err(TypeError::Custom("host function not found".into()))
                                 }
-                                AbstractBody::Expr(ref e) => {
+                            }
+                            AbstractBody::Expr(ref e) => {
+                                if params.len() != apply_params.len() {
+                                    Err(TypeError::Custom("param count mismatch".into()))
+                                } else {
+                                    let resolved: Vec<(
+                                        Cow<'a, str>,
+                                        Expr<'a>,
+                                    )> = (0..params.len())
+                                        .map(|i| (params[i].clone(), apply_params[i].clone()))
+                                        .collect();
+
                                     let mut new_subs = param_set.clone();
                                     ::std::mem::swap(&mut new_subs, &mut trs.subs);
 
@@ -182,18 +198,17 @@ pub fn check_expr<'a, 'b>(
 
                                     Ok(ret?)
                                 }
-                            },
-                            _ => panic!("invalid decl expr"),
-                        }
-                    } else {
-                        Err(TypeError::Custom("param count mismatch".into()))
+                            }
+                        },
+                        _ => panic!("bug: invalid decl expr"),
                     }
                 }
                 _ => {
                     if apply_params.len() != 0 {
-                        Err(TypeError::Custom(
-                            "cannot apply with params on non-function values".into(),
-                        ))
+                        Err(TypeError::Custom(format!(
+                            "cannot apply with params on non-function value of type {:?}",
+                            target_ty
+                        )))
                     } else {
                         Ok(target_ty)
                     }

@@ -27,19 +27,6 @@ fn token_end<F: Fn(u8) -> bool>(raw: &[u8], begin: usize, predicate: F) -> usize
         .unwrap_or(raw.len())
 }
 
-fn identifier_end(raw: &[u8], begin: usize) -> usize {
-    token_end(raw, begin, |x| {
-        !((x >= b'a' && x <= b'z')
-            || (x >= b'A' && x <= b'Z')
-            || x == b'_'
-            || (x >= b'0' && x <= b'9'))
-    })
-}
-
-fn int_end(raw: &[u8], begin: usize) -> usize {
-    token_end(raw, begin, |x| !(x >= b'0' && x <= b'9'))
-}
-
 impl<'a> TokenStream<'a> {
     pub fn new(raw: &'a str) -> TokenStream<'a> {
         TokenStream {
@@ -57,38 +44,46 @@ impl<'a> TokenStream<'a> {
         self.pos += 1;
 
         let ret = match ch {
-            b' ' | b'\n' | b'\t' | b'\r' => self.next_token(),
             b'(' => Ok(Token::ExprBegin),
             b')' => Ok(Token::ExprEnd),
             b'\\' => Ok(Token::Lambda),
             b'$' => {
                 let start = self.pos;
-                let end = identifier_end(self.raw, self.pos);
-                self.pos = end;
+                self.pos = token_end(self.raw, self.pos, |x| {
+                    !(x.is_ascii_alphanumeric() || x == b'_')
+                });
                 Ok(Token::HostFunction(
-                    ::std::str::from_utf8(&self.raw[start..end])
+                    ::std::str::from_utf8(&self.raw[start..self.pos])
                         .map_err(|_| ParseError::InvalidUtf8)?,
                 ))
             }
-            x if (x >= b'a' && x <= b'z') || (x >= b'A' && x <= b'Z') || x == b'_' => {
+            b'#' => {
+                self.pos = token_end(self.raw, self.pos, |x| x == b'\r' || x == b'\n');
+                self.next_token()
+            }
+            x if x.is_ascii_alphabetic() || x == b'_' => {
                 let start = self.pos - 1;
-                let end = identifier_end(self.raw, self.pos);
-                self.pos = end;
+                self.pos = token_end(self.raw, self.pos, |x| {
+                    !(x.is_ascii_alphanumeric() || x == b'_')
+                });
                 Ok(Token::Identifier(
-                    ::std::str::from_utf8(&self.raw[start..end])
+                    ::std::str::from_utf8(&self.raw[start..self.pos])
                         .map_err(|_| ParseError::InvalidUtf8)?,
                 ))
             }
-            x if (x >= b'0' && x <= b'9') => {
+            x if x.is_ascii_digit() => {
                 let start = self.pos - 1;
-                let end = int_end(self.raw, self.pos);
-                self.pos = end;
+                self.pos = token_end(self.raw, self.pos, |x| !x.is_ascii_digit());
                 Ok(Token::IntLiteral(
                     ::std::str::from_utf8(&self.raw[start..self.pos])
                         .map_err(|_| ParseError::InvalidUtf8)?
                         .parse::<i64>()
                         .map_err(|_| ParseError::InvalidNumber)?,
                 ))
+            }
+            x if x.is_ascii_whitespace() => {
+                self.pos = token_end(self.raw, self.pos, |x| !x.is_ascii_whitespace());
+                self.next_token()
             }
             _ => Err(ParseError::InvalidToken),
         };
@@ -100,7 +95,13 @@ impl<'a> TokenStream<'a> {
 pub fn parse_expr(input: &str) -> Result<Expr<'static>, ParseError> {
     let mut ts = TokenStream::new(input);
     match ts.next_token()? {
-        Token::ExprBegin => rename_expr(&_parse_expr(&mut ts)?, &mut RenameContext::default()),
+        Token::ExprBegin => {
+            let ret = rename_expr(&_parse_expr(&mut ts)?, &mut RenameContext::default());
+            if token_end(ts.raw, ts.pos, |x| !x.is_ascii_whitespace()) != ts.raw.len() {
+                return Err(ParseError::BracketMismatch);
+            }
+            ret
+        }
         _ => Err(ParseError::ExpectingExprBegin),
     }
 }

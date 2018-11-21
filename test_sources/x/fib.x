@@ -8,5 +8,5 @@
                 ($add (self ($sub x 1)) (self ($sub x 2)))
             )
         ))
-    ) (5)
+    ) (26)
 )

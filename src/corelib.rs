@@ -8,6 +8,7 @@ use std::borrow::Cow;
 pub struct BasicRelop {
     pub int_op: fn(a: i64, b: i64) -> Result<bool, RuntimeError>,
     pub float_op: fn(a: f64, b: f64) -> Result<bool, RuntimeError>,
+    pub bool_op: fn(a: bool, b: bool) -> Result<bool, RuntimeError>,
 }
 
 impl HostFunction for BasicRelop {
@@ -21,7 +22,8 @@ impl HostFunction for BasicRelop {
                 (&DataType::Value(ValueType::Int), &DataType::Value(ValueType::Int))
                 | (&DataType::Value(ValueType::Int), &DataType::Value(ValueType::Float))
                 | (&DataType::Value(ValueType::Float), &DataType::Value(ValueType::Int))
-                | (&DataType::Value(ValueType::Float), &DataType::Value(ValueType::Float)) => {
+                | (&DataType::Value(ValueType::Float), &DataType::Value(ValueType::Float))
+                | (&DataType::Value(ValueType::Bool), &DataType::Value(ValueType::Bool)) => {
                     Ok(DataType::Value(ValueType::Bool))
                 }
                 x => Err(TypeError::Custom(format!(
@@ -168,13 +170,40 @@ impl HostManager {
                     },
                 ),
             ],
-            relops: vec![(
-                "eq",
-                BasicRelop {
-                    int_op: |a, b| Ok(a == b),
-                    float_op: |a, b| Ok(a == b),
-                },
-            )],
+            relops: vec![
+                (
+                    "eq",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a == b),
+                        float_op: |a, b| Ok(a == b),
+                        bool_op: |a, b| Ok(a == b),
+                    },
+                ),
+                (
+                    "ne",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a != b),
+                        float_op: |a, b| Ok(a != b),
+                        bool_op: |a, b| Ok(a != b),
+                    },
+                ),
+                (
+                    "and",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a != 0 && b != 0),
+                        float_op: |a, b| Ok(a != 0.0 && b != 0.0),
+                        bool_op: |a, b| Ok(a && b),
+                    },
+                ),
+                (
+                    "or",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a != 0 || b != 0),
+                        float_op: |a, b| Ok(a != 0.0 || b != 0.0),
+                        bool_op: |a, b| Ok(a || b),
+                    },
+                ),
+            ],
             ifop: IfOp,
         }
     }

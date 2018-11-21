@@ -15,7 +15,7 @@ fn main() {
         .unwrap();
     {
         let mut ast: x_lang::ast::Expr = x_lang::parser::parse_expr(ast_text.as_str()).unwrap();
-        println!("{}", serde_yaml::to_string(&ast).unwrap());
+        //println!("{}", serde_yaml::to_string(&ast).unwrap());
 
         let mut trs = x_lang::typeck::TypeResolveState::default();
 

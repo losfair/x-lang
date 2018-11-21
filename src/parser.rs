@@ -92,7 +92,7 @@ impl<'a> TokenStream<'a> {
             }
             _ => Err(ParseError::InvalidToken),
         };
-        eprintln!("{:?}", ret);
+        //eprintln!("{:?}", ret);
         ret
     }
 }
@@ -112,7 +112,11 @@ fn _parse_expr<'a>(input: &mut TokenStream<'a>) -> Result<Expr<'static>, ParseEr
     loop {
         let e = match input.next_token()? {
             Token::Identifier(id) => Expr {
-                body: Rc::new(ExprBody::Name(Cow::Owned(id.to_owned()))),
+                body: Rc::new(match id {
+                    "true" => ExprBody::Const(ConstExpr::Bool(true)),
+                    "false" => ExprBody::Const(ConstExpr::Bool(false)),
+                    _ => ExprBody::Name(Cow::Owned(id.to_owned())),
+                }),
             },
             Token::IntLiteral(v) => Expr {
                 body: Rc::new(ExprBody::Const(ConstExpr::Int(v))),

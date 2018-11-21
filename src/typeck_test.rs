@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::builtin::*;
 use crate::error::*;
+use crate::eval::{EvalContext, LazyValue, RuntimeValue};
 use crate::host::*;
 use crate::typeck::*;
 use std::borrow::Cow;
@@ -16,6 +17,14 @@ impl HostFunction for NotFunction {
         } else {
             Err(TypeError::Custom("not: type mismatch".into()))
         }
+    }
+
+    fn eval<'a, 'b, 'c>(
+        &self,
+        _ectx: &mut EvalContext<'a, 'b, 'c>,
+        _params: &[LazyValue<'a, 'b>],
+    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        unreachable!()
     }
 }
 

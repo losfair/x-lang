@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::builtin::*;
 use crate::error::*;
+use crate::eval::*;
 use crate::host::HostFunction;
 use std::borrow::Cow;
 
@@ -36,6 +37,33 @@ impl HostFunction for BasicRelop {
                 "invalid param count for rel operator".into(),
             ))
         }
+    }
+
+    fn eval<'a, 'b, 'c>(
+        &self,
+        ectx: &mut EvalContext<'a, 'b, 'c>,
+        params: &[LazyValue<'a, 'b>],
+    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        let left = params[0].eval(ectx)?;
+        let right = params[1].eval(ectx)?;
+        Ok(match (left, right) {
+            (RuntimeValue::Int(a), RuntimeValue::Int(b)) => {
+                RuntimeValue::Bool((self.int_op)(a, b)?)
+            }
+            (RuntimeValue::Int(a), RuntimeValue::Float(b)) => {
+                RuntimeValue::Bool((self.float_op)(a as f64, b)?)
+            }
+            (RuntimeValue::Float(a), RuntimeValue::Int(b)) => {
+                RuntimeValue::Bool((self.float_op)(a, b as f64)?)
+            }
+            (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
+                RuntimeValue::Bool((self.float_op)(a, b)?)
+            }
+            (RuntimeValue::Bool(a), RuntimeValue::Bool(b)) => {
+                RuntimeValue::Bool((self.bool_op)(a, b)?)
+            }
+            _ => unreachable!(),
+        })
     }
 }
 
@@ -76,6 +104,28 @@ impl HostFunction for BasicBinop {
             ))
         }
     }
+
+    fn eval<'a, 'b, 'c>(
+        &self,
+        ectx: &mut EvalContext<'a, 'b, 'c>,
+        params: &[LazyValue<'a, 'b>],
+    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        let left = params[0].eval(ectx)?;
+        let right = params[1].eval(ectx)?;
+        Ok(match (left, right) {
+            (RuntimeValue::Int(a), RuntimeValue::Int(b)) => RuntimeValue::Int((self.int_op)(a, b)?),
+            (RuntimeValue::Int(a), RuntimeValue::Float(b)) => {
+                RuntimeValue::Float((self.float_op)(a as f64, b)?)
+            }
+            (RuntimeValue::Float(a), RuntimeValue::Int(b)) => {
+                RuntimeValue::Float((self.float_op)(a, b as f64)?)
+            }
+            (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
+                RuntimeValue::Float((self.float_op)(a, b)?)
+            }
+            _ => unreachable!(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -108,6 +158,24 @@ impl HostFunction for IfOp {
             Err(TypeError::Custom(
                 "invalid param count for if operator".into(),
             ))
+        }
+    }
+
+    fn eval<'a, 'b, 'c>(
+        &self,
+        ectx: &mut EvalContext<'a, 'b, 'c>,
+        params: &[LazyValue<'a, 'b>],
+    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        let predicate = if let RuntimeValue::Bool(x) = params[0].eval(ectx)? {
+            x
+        } else {
+            panic!("bug: type mismatch")
+        };
+
+        if predicate {
+            params[1].eval(ectx)
+        } else {
+            params[2].eval(ectx)
         }
     }
 }

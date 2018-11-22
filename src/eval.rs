@@ -56,11 +56,30 @@ pub struct LazyValue<'b> {
     outcome: Rc<RefCell<Option<RuntimeValue<'b>>>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct EvalContext<'b, 'c> {
     values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
     host_functions: HashMap<String, &'c dyn HostFunction>,
     slots: Slab<LazyValue<'b>>,
+    pub release_pool: SlotReleasePool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SlotReleasePool {
+    pool: Rc<RefCell<Vec<SlotRef>>>,
+}
+
+impl SlotReleasePool {
+    pub fn put(&self, r: SlotRef) {
+        self.pool.borrow_mut().push(r);
+    }
+
+    pub fn release<'b, 'c>(&self, ctx: &mut EvalContext<'b, 'c>) {
+        let pool = ::std::mem::replace(&mut *self.pool.borrow_mut(), Vec::new());
+        for r in pool {
+            ctx.slots.remove(r.id);
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -85,20 +104,19 @@ impl<'b, 'c> EvalContext<'b, 'c> {
     pub fn read_slot(&mut self, r: SlotRef) -> LazyValue<'b> {
         self.slots[r.id].clone()
     }
-
-    pub fn release_slot(&mut self, r: SlotRef) {
-        self.slots.remove(r.id);
-    }
 }
 
 pub fn eval_expr<'b, 'c>(
     e: &'b Expr,
-    mut ctx: EvalContext<'b, 'c>,
+    ctx: &mut EvalContext<'b, 'c>,
 ) -> Result<RuntimeValue<'b>, RuntimeError> {
-    _eval_expr(e, &mut ctx)
+    let ret = _do_eval_expr(e, ctx);
+    let pool = ctx.release_pool.clone();
+    pool.release(ctx);
+    ret
 }
 
-fn _eval_expr<'b, 'c>(
+fn _do_eval_expr<'b, 'c>(
     e: &'b Expr,
     ctx: &mut EvalContext<'b, 'c>,
 ) -> Result<RuntimeValue<'b>, RuntimeError> {
@@ -119,7 +137,7 @@ fn _eval_expr<'b, 'c>(
             ref params,
         } => {
             let apply_params = params;
-            let target = _eval_expr(target, ctx)?;
+            let target = eval_expr(target, ctx)?;
 
             match target {
                 RuntimeValue::Function {
@@ -139,7 +157,7 @@ fn _eval_expr<'b, 'c>(
                     });
 
                     ::std::mem::swap(&mut context_values, &mut ctx.values);
-                    let ret = _eval_expr(body, ctx);
+                    let ret = eval_expr(body, ctx);
                     ::std::mem::swap(&mut context_values, &mut ctx.values);
 
                     ret
@@ -199,7 +217,7 @@ impl<'b> LazyValue<'b> {
         let mut new_values = self.context_values.clone();
 
         ::std::mem::swap(&mut new_values, &mut ctx.values);
-        let ret = _eval_expr(self.expr, ctx);
+        let ret = eval_expr(self.expr, ctx);
         ::std::mem::swap(&mut new_values, &mut ctx.values);
 
         let ret = ret?;

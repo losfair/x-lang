@@ -4,7 +4,6 @@ use crate::error::*;
 use crate::eval::*;
 use crate::host::HostFunction;
 use std::any::Any;
-use std::cell::Cell;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -195,8 +194,14 @@ pub struct List {
 #[derive(Debug)]
 pub struct ListNode {
     value: SlotRef,
-    head_count: Cell<usize>,
+    pool: SlotReleasePool,
     next: Option<Rc<ListNode>>,
+}
+
+impl Drop for ListNode {
+    fn drop(&mut self) {
+        self.pool.put(self.value);
+    }
 }
 
 impl CustomValue for List {
@@ -260,7 +265,7 @@ impl HostFunction for ListPushOp {
             RuntimeValue::Empty => Ok(RuntimeValue::Custom(CustomValueBox::new(Box::new(List {
                 head: Rc::new(ListNode {
                     value: ectx.write_slot(val),
-                    head_count: Cell::new(1),
+                    pool: ectx.release_pool.clone(),
                     next: None,
                 }),
             })))),
@@ -268,7 +273,7 @@ impl HostFunction for ListPushOp {
                 Ok(RuntimeValue::Custom(CustomValueBox::new(Box::new(List {
                     head: Rc::new(ListNode {
                         value: ectx.write_slot(val),
-                        head_count: Cell::new(1),
+                        pool: ectx.release_pool.clone(),
                         next: Some(
                             cv.inner
                                 .as_any()

@@ -38,6 +38,6 @@ fn main() {
         panic!("error: your program will never terminate");
     }
 
-    let ret = x_lang::eval::eval_expr(&ast, ectx).unwrap();
-    println!("{:?}", ret);
+    let ret = x_lang::eval::eval_expr(&ast, &mut ectx).unwrap();
+    println!("{:?} {:?}", ectx, ret);
 }

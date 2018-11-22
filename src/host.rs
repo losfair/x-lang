@@ -8,6 +8,6 @@ pub trait HostFunction: Debug {
     fn eval<'a, 'b, 'c>(
         &self,
         ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &[LazyValue<'a, 'b>],
+        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError>;
 }

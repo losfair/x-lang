@@ -22,7 +22,7 @@ impl HostFunction for NotFunction {
     fn eval<'a, 'b, 'c>(
         &self,
         _ectx: &mut EvalContext<'a, 'b, 'c>,
-        _params: &[LazyValue<'a, 'b>],
+        _params: &mut Iterator<Item = LazyValue<'a, 'b>>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
         unreachable!()
     }

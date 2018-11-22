@@ -96,19 +96,19 @@ fn _eval_expr<'a, 'b, 'c>(
                     ret
                 }
                 RuntimeValue::Host(name) => {
-                    let lazy_params: Vec<LazyValue<'a, 'b>> = apply_params
-                        .iter()
-                        .map(|x| LazyValue {
-                            expr: x,
-                            context_values: ctx.values.clone(),
-                            outcome: Rc::new(RefCell::new(None)),
-                        })
-                        .collect();
                     let hf = ctx
                         .host_functions
                         .get(name)
                         .unwrap_or_else(|| panic!("bug: host function not found"));
-                    hf.eval(ctx, &lazy_params)
+                    let values = ctx.values.clone();
+                    hf.eval(
+                        ctx,
+                        &mut apply_params.iter().map(|x| LazyValue {
+                            expr: x,
+                            context_values: values.clone(),
+                            outcome: Rc::new(RefCell::new(None)),
+                        }),
+                    )
                 }
                 _ => {
                     if apply_params.len() == 0 {

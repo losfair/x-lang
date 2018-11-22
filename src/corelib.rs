@@ -42,10 +42,10 @@ impl HostFunction for BasicRelop {
     fn eval<'a, 'b, 'c>(
         &self,
         ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &[LazyValue<'a, 'b>],
+        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
-        let left = params[0].eval(ectx)?;
-        let right = params[1].eval(ectx)?;
+        let left = params.next().unwrap().eval(ectx)?;
+        let right = params.next().unwrap().eval(ectx)?;
         Ok(match (left, right) {
             (RuntimeValue::Int(a), RuntimeValue::Int(b)) => {
                 RuntimeValue::Bool((self.int_op)(a, b)?)
@@ -108,10 +108,10 @@ impl HostFunction for BasicBinop {
     fn eval<'a, 'b, 'c>(
         &self,
         ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &[LazyValue<'a, 'b>],
+        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
-        let left = params[0].eval(ectx)?;
-        let right = params[1].eval(ectx)?;
+        let left = params.next().unwrap().eval(ectx)?;
+        let right = params.next().unwrap().eval(ectx)?;
         Ok(match (left, right) {
             (RuntimeValue::Int(a), RuntimeValue::Int(b)) => RuntimeValue::Int((self.int_op)(a, b)?),
             (RuntimeValue::Int(a), RuntimeValue::Float(b)) => {
@@ -164,18 +164,18 @@ impl HostFunction for IfOp {
     fn eval<'a, 'b, 'c>(
         &self,
         ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &[LazyValue<'a, 'b>],
+        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
-        let predicate = if let RuntimeValue::Bool(x) = params[0].eval(ectx)? {
+        let predicate = if let RuntimeValue::Bool(x) = params.next().unwrap().eval(ectx)? {
             x
         } else {
             panic!("bug: type mismatch")
         };
 
         if predicate {
-            params[1].eval(ectx)
+            params.nth(0).unwrap().eval(ectx)
         } else {
-            params[2].eval(ectx)
+            params.nth(1).unwrap().eval(ectx)
         }
     }
 }

@@ -225,16 +225,60 @@ impl CustomDataType for ListType {
 }
 
 #[derive(Debug)]
+pub struct ListHeadOp;
+impl HostFunction for ListHeadOp {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
+        if params.len() == 1 {
+            if params[0] == DataType::Divergent {
+                return Ok(DataType::Divergent);
+            }
+
+            if let DataType::Custom(ref inner) = params[0] {
+                if let Some(list) = inner.as_any().downcast_ref::<ListType>() {
+                    Ok(list.inner_ty.clone())
+                } else {
+                    Err(TypeError::Custom("not a list".into()))
+                }
+            } else {
+                Err(TypeError::Custom("not a list".into()))
+            }
+        } else {
+            Err(TypeError::Custom("invalid param count".into()))
+        }
+    }
+
+    fn eval<'b, 'c>(
+        &self,
+        ectx: &mut EvalContext<'b, 'c>,
+        params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
+        let list = params.next().unwrap().eval(ectx)?;
+
+        match list {
+            RuntimeValue::Custom(cv) => ectx
+                .read_slot(cv.inner.as_any().downcast_ref::<List>().unwrap().head.value)
+                .eval(ectx),
+            RuntimeValue::Empty => Err(RuntimeError::Custom("empty list".into())),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ListPushOp;
 impl HostFunction for ListPushOp {
     fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 2 {
-            if params[1] == DataType::Empty {
-                Ok(DataType::Custom(Rc::new(Box::new(ListType {
-                    inner_ty: params[0].clone(),
-                }))))
-            } else {
-                if let DataType::Custom(ref inner) = params[1] {
+            if params[0] == DataType::Divergent {
+                return Ok(DataType::Divergent);
+            }
+            match params[1] {
+                DataType::Empty | DataType::Divergent => {
+                    Ok(DataType::Custom(Rc::new(Box::new(ListType {
+                        inner_ty: params[0].clone(),
+                    }))))
+                }
+                DataType::Custom(ref inner) => {
                     if let Some(list) = (**inner).as_any().downcast_ref::<ListType>() {
                         if list.inner_ty == params[0] {
                             Ok(DataType::Custom(Rc::new(Box::new(list.clone()))))
@@ -244,9 +288,8 @@ impl HostFunction for ListPushOp {
                     } else {
                         Err(TypeError::Custom("push target not list or empty".into()))
                     }
-                } else {
-                    Err(TypeError::Custom("push target not list or empty".into()))
                 }
+                _ => Err(TypeError::Custom("push target not list or empty".into())),
             }
         } else {
             Err(TypeError::Custom("expecting exactly 2 params".into()))
@@ -295,6 +338,7 @@ pub struct HostManager {
     relops: Vec<(&'static str, BasicRelop)>,
     ifop: IfOp,
     list_push_op: ListPushOp,
+    list_head_op: ListHeadOp,
 }
 
 impl HostManager {
@@ -417,6 +461,7 @@ impl HostManager {
             ],
             ifop: IfOp,
             list_push_op: ListPushOp,
+            list_head_op: ListHeadOp,
         }
     }
 
@@ -437,6 +482,10 @@ impl HostManager {
     }
 
     pub fn get_list_ops(&self) -> impl Iterator<Item = (String, &dyn HostFunction)> {
-        vec![("list_push".into(), &self.list_push_op as &dyn HostFunction)].into_iter()
+        vec![
+            ("list_push".into(), &self.list_push_op as &dyn HostFunction),
+            ("list_head".into(), &self.list_head_op as &dyn HostFunction),
+        ]
+        .into_iter()
     }
 }

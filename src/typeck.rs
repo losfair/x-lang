@@ -2,30 +2,29 @@ use crate::ast::*;
 use crate::builtin::ValueType;
 use crate::error::TypeError;
 use crate::host::HostFunction;
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-fn never_expr<'a>() -> Expr<'a> {
+fn never_expr() -> Expr {
     Expr {
         body: Rc::new(ExprBody::Never),
     }
 }
 
 #[derive(Debug, Default)]
-pub struct TypeResolveState<'a, 'b> {
-    subs: BTreeMap<Cow<'a, str>, Expr<'a>>,
-    host_functions: BTreeMap<Cow<'a, str>, &'b dyn HostFunction>,
-    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody<'a>>>>,
+pub struct TypeResolveState<'b> {
+    subs: BTreeMap<String, Expr>,
+    host_functions: BTreeMap<String, &'b dyn HostFunction>,
+    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody>>>,
 }
 
-pub struct ExprReachGuard<'a> {
-    me: *const ExprBody<'a>,
-    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody<'a>>>>,
+pub struct ExprReachGuard {
+    me: *const ExprBody,
+    expr_reach: Rc<RefCell<BTreeSet<*const ExprBody>>>,
 }
 
-impl<'a> Drop for ExprReachGuard<'a> {
+impl Drop for ExprReachGuard {
     fn drop(&mut self) {
         if self.expr_reach.borrow_mut().remove(&self.me) == false {
             panic!("erg: not found");
@@ -33,9 +32,9 @@ impl<'a> Drop for ExprReachGuard<'a> {
     }
 }
 
-impl<'a, 'b> TypeResolveState<'a, 'b> {
-    fn guarded_expr_reach(&self, e: &Expr<'a>) -> Option<ExprReachGuard<'a>> {
-        let b: *const ExprBody<'a> = &*e.body;
+impl<'b> TypeResolveState<'b> {
+    fn guarded_expr_reach(&self, e: &Expr) -> Option<ExprReachGuard> {
+        let b: *const ExprBody = &*e.body;
 
         let mut reach = self.expr_reach.borrow_mut();
         if reach.contains(&b) {
@@ -49,15 +48,15 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
         }
     }
 
-    pub fn add_hosts<H: IntoIterator<Item = (Cow<'a, str>, &'b dyn HostFunction)>>(
+    pub fn add_hosts<H: IntoIterator<Item = (String, &'b dyn HostFunction)>>(
         &mut self,
         host_functions: H,
     ) {
         self.host_functions.extend(host_functions);
     }
 
-    pub fn resolve_name(&self, mut name: Cow<'a, str>) -> Option<Expr<'a>> {
-        let mut path: BTreeSet<Cow<'a, str>> = BTreeSet::new();
+    pub fn resolve_name(&self, mut name: String) -> Option<Expr> {
+        let mut path: BTreeSet<String> = BTreeSet::new();
 
         loop {
             if path.contains(&name) {
@@ -80,10 +79,10 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
 
     pub fn with_resolved<T, F: FnOnce(&mut Self) -> T>(
         &mut self,
-        pairs: &[(Cow<'a, str>, Expr<'a>)],
+        pairs: &[(String, Expr)],
         callback: F,
     ) -> T {
-        let old: Vec<(&Cow<'a, str>, Option<Expr<'a>>)> = pairs
+        let old: Vec<(&String, Option<Expr>)> = pairs
             .iter()
             .map(|(k, _)| (k, self.subs.get(k).cloned()))
             .collect();
@@ -102,19 +101,13 @@ impl<'a, 'b> TypeResolveState<'a, 'b> {
     }
 }
 
-pub fn check_expr<'a, 'b>(
-    e: &Expr<'a>,
-    trs: &mut TypeResolveState<'a, 'b>,
-) -> Result<DataType<'a>, TypeError> {
+pub fn check_expr<'b>(e: &Expr, trs: &mut TypeResolveState<'b>) -> Result<DataType, TypeError> {
     let ret = _check_expr(e, trs);
     //println!("CHECK {:?}, RESULT = {:?}", e, ret);
     ret
 }
 
-pub fn _check_expr<'a, 'b>(
-    e: &Expr<'a>,
-    trs: &mut TypeResolveState<'a, 'b>,
-) -> Result<DataType<'a>, TypeError> {
+pub fn _check_expr<'b>(e: &Expr, trs: &mut TypeResolveState<'b>) -> Result<DataType, TypeError> {
     let _guard = match trs.guarded_expr_reach(e) {
         Some(v) => v,
         None => return Ok(DataType::Divergent),
@@ -134,6 +127,7 @@ pub fn _check_expr<'a, 'b>(
             ConstExpr::Int(_) => DataType::Value(ValueType::Int),
             ConstExpr::Bool(_) => DataType::Value(ValueType::Bool),
             ConstExpr::Float(_) => DataType::Value(ValueType::Float),
+            ConstExpr::Empty => DataType::Empty,
         }),
         ExprBody::Apply {
             ref target,
@@ -162,7 +156,7 @@ pub fn _check_expr<'a, 'b>(
                     ref decl_expr,
                     ref param_set,
                 } => {
-                    let mut param_types: Vec<DataType<'a>> = Vec::new();
+                    let mut param_types: Vec<DataType> = Vec::new();
 
                     for i in 0..apply_params.len() {
                         let param_ty = check_expr(&apply_params[i], trs)?;
@@ -172,7 +166,7 @@ pub fn _check_expr<'a, 'b>(
                     match *decl_expr.body {
                         ExprBody::Abstract { ref body, .. } => match *body {
                             AbstractBody::Host(ref host) => {
-                                if let Some(ref host) = trs.host_functions.get(host.as_ref()) {
+                                if let Some(ref host) = trs.host_functions.get(host) {
                                     Ok(host.typeck(&param_types)?)
                                 } else {
                                     Err(TypeError::Custom(format!(
@@ -186,8 +180,8 @@ pub fn _check_expr<'a, 'b>(
                                     Err(TypeError::Custom("param count mismatch".into()))
                                 } else {
                                     let resolved: Vec<(
-                                        Cow<'a, str>,
-                                        Expr<'a>,
+                                        String,
+                                        Expr,
                                     )> = (0..params.len())
                                         .map(|i| (params[i].clone(), apply_params[i].clone()))
                                         .collect();

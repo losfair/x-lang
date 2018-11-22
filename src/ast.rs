@@ -1,51 +1,63 @@
 use crate::builtin::ValueType;
 use crate::error::*;
-use std::borrow::Cow;
+use std::any::Any;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum DataType<'a> {
+pub enum DataType {
+    Empty,
     Value(ValueType),
-    Sum(Vec<(Cow<'a, str>, DataType<'a>)>),
-    Product(Vec<(Cow<'a, str>, DataType<'a>)>),
     FunctionDecl {
-        params: Vec<Cow<'a, str>>,
-        decl_expr: Expr<'a>,
-        param_set: BTreeMap<Cow<'a, str>, Expr<'a>>,
+        params: Vec<String>,
+        decl_expr: Expr,
+        param_set: BTreeMap<String, Expr>,
     },
     Divergent,
+    Custom(Rc<Box<CustomDataType>>),
+}
+
+pub trait CustomDataType: Debug {
+    fn cdt_eq(&self, other: &CustomDataType) -> bool;
+    fn as_any(&self) -> &Any;
+}
+
+impl PartialEq for CustomDataType {
+    fn eq(&self, other: &CustomDataType) -> bool {
+        self.cdt_eq(other)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Expr<'a> {
+pub struct Expr {
     #[serde(flatten)]
-    pub body: Rc<ExprBody<'a>>,
+    pub body: Rc<ExprBody>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum ExprBody<'a> {
+pub enum ExprBody {
     Const(ConstExpr),
-    Name(Cow<'a, str>),
+    Name(String),
     Apply {
-        target: Expr<'a>,
-        params: Vec<Expr<'a>>,
+        target: Expr,
+        params: Vec<Expr>,
     },
     Abstract {
-        params: Vec<Cow<'a, str>>,
-        body: AbstractBody<'a>,
+        params: Vec<String>,
+        body: AbstractBody,
     },
     Match {
-        value: Expr<'a>,
-        branches: Vec<(Cow<'a, str>, Expr<'a>)>,
+        value: Expr,
+        branches: Vec<(String, Expr)>,
     },
     Never,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum AbstractBody<'a> {
-    Host(Cow<'a, str>),
-    Expr(Expr<'a>),
+pub enum AbstractBody {
+    Host(String),
+    Expr(Expr),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -53,19 +65,16 @@ pub enum ConstExpr {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Empty,
 }
 
 #[derive(Default)]
-pub struct RenameContext<'a> {
-    rename_state: BTreeMap<Cow<'a, str>, usize>,
+pub struct RenameContext {
+    rename_state: BTreeMap<String, usize>,
 }
 
-impl<'a> RenameContext<'a> {
-    pub fn with_renamed<T, F: FnOnce(&mut Self) -> T>(
-        &mut self,
-        renames: &[Cow<'a, str>],
-        f: F,
-    ) -> T {
+impl RenameContext {
+    pub fn with_renamed<T, F: FnOnce(&mut Self) -> T>(&mut self, renames: &[String], f: F) -> T {
         for v in renames {
             if let Some(c) = self.rename_state.get_mut(v) {
                 *c += 1;
@@ -77,15 +86,15 @@ impl<'a> RenameContext<'a> {
         f(self)
     }
 
-    pub fn get_renamed(&self, k: &Cow<'a, str>) -> Result<Cow<'a, str>, ParseError> {
+    pub fn get_renamed(&self, k: &String) -> Result<String, ParseError> {
         match self.rename_state.get(k) {
-            Some(v) => Ok(Cow::Owned(format!("{}#{}", k, v))),
+            Some(v) => Ok(format!("{}#{}", k, v)),
             None => Err(ParseError::Custom(format!("name not found: {}", k))),
         }
     }
 }
 
-pub fn rename_expr<'a>(e: &Expr<'a>, ctx: &mut RenameContext<'a>) -> Result<Expr<'a>, ParseError> {
+pub fn rename_expr(e: &Expr, ctx: &mut RenameContext) -> Result<Expr, ParseError> {
     Ok(Expr {
         body: match *e.body {
             ExprBody::Const(_) => e.body.clone(),

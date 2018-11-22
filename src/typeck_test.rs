@@ -4,14 +4,13 @@ use crate::error::*;
 use crate::eval::{EvalContext, LazyValue, RuntimeValue};
 use crate::host::*;
 use crate::typeck::*;
-use std::borrow::Cow;
 use std::rc::Rc;
 
 #[derive(Debug)]
 struct NotFunction {}
 
 impl HostFunction for NotFunction {
-    fn typeck<'a>(&self, params: &[DataType<'a>]) -> Result<DataType<'a>, TypeError> {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 1 && params[0] == DataType::Value(ValueType::Bool) {
             Ok(DataType::Value(ValueType::Bool))
         } else {
@@ -19,11 +18,11 @@ impl HostFunction for NotFunction {
         }
     }
 
-    fn eval<'a, 'b, 'c>(
+    fn eval<'b, 'c>(
         &self,
-        _ectx: &mut EvalContext<'a, 'b, 'c>,
-        _params: &mut Iterator<Item = LazyValue<'a, 'b>>,
-    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        _ectx: &mut EvalContext<'b, 'c>,
+        _params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
         unreachable!()
     }
 }
@@ -34,17 +33,17 @@ fn test_typeck() {
         body: Rc::new(ExprBody::Apply {
             target: Expr {
                 body: Rc::new(ExprBody::Abstract {
-                    params: vec![Cow::Borrowed("a")],
+                    params: vec!["a".to_string()],
                     body: AbstractBody::Expr(Expr {
                         body: Rc::new(ExprBody::Apply {
                             target: Expr {
                                 body: Rc::new(ExprBody::Abstract {
-                                    params: vec![Cow::Borrowed("value")], // unused
-                                    body: AbstractBody::Host(Cow::Borrowed("not")),
+                                    params: vec!["value".to_string()], // unused
+                                    body: AbstractBody::Host("not".to_string()),
                                 }),
                             },
                             params: vec![Expr {
-                                body: Rc::new(ExprBody::Name(Cow::Borrowed("a"))),
+                                body: Rc::new(ExprBody::Name("a".to_string())),
                             }],
                         }),
                     }),
@@ -58,7 +57,7 @@ fn test_typeck() {
 
     let not_f = NotFunction {};
     let mut trs = TypeResolveState::default();
-    trs.add_hosts(vec![(Cow::Borrowed("not"), &not_f as &dyn HostFunction)]);
+    trs.add_hosts(vec![("not".to_string(), &not_f as &dyn HostFunction)]);
     let out = check_expr(&mut e, &mut trs).unwrap();
     if out != DataType::Value(ValueType::Bool) {
         panic!("output type mismatch");

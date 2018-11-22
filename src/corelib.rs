@@ -3,7 +3,7 @@ use crate::builtin::*;
 use crate::error::*;
 use crate::eval::*;
 use crate::host::HostFunction;
-use std::borrow::Cow;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct BasicRelop {
@@ -13,7 +13,7 @@ pub struct BasicRelop {
 }
 
 impl HostFunction for BasicRelop {
-    fn typeck<'a>(&self, params: &[DataType<'a>]) -> Result<DataType<'a>, TypeError> {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 2 {
             if params[0] == DataType::Divergent || params[1] == DataType::Divergent {
                 return Ok(DataType::Divergent);
@@ -39,11 +39,11 @@ impl HostFunction for BasicRelop {
         }
     }
 
-    fn eval<'a, 'b, 'c>(
+    fn eval<'b, 'c>(
         &self,
-        ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
-    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        ectx: &mut EvalContext<'b, 'c>,
+        params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
         let left = params.next().unwrap().eval(ectx)?;
         let right = params.next().unwrap().eval(ectx)?;
         Ok(match (left, right) {
@@ -74,7 +74,7 @@ pub struct BasicBinop {
 }
 
 impl HostFunction for BasicBinop {
-    fn typeck<'a>(&self, params: &[DataType<'a>]) -> Result<DataType<'a>, TypeError> {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 2 {
             if params[0] == DataType::Divergent || params[1] == DataType::Divergent {
                 return Ok(DataType::Divergent);
@@ -105,11 +105,11 @@ impl HostFunction for BasicBinop {
         }
     }
 
-    fn eval<'a, 'b, 'c>(
+    fn eval<'b, 'c>(
         &self,
-        ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
-    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        ectx: &mut EvalContext<'b, 'c>,
+        params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
         let left = params.next().unwrap().eval(ectx)?;
         let right = params.next().unwrap().eval(ectx)?;
         Ok(match (left, right) {
@@ -131,7 +131,7 @@ impl HostFunction for BasicBinop {
 #[derive(Debug)]
 pub struct IfOp;
 impl HostFunction for IfOp {
-    fn typeck<'a>(&self, params: &[DataType<'a>]) -> Result<DataType<'a>, TypeError> {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 3 {
             if params[0] == DataType::Divergent {
                 Ok(DataType::Divergent)
@@ -161,11 +161,11 @@ impl HostFunction for IfOp {
         }
     }
 
-    fn eval<'a, 'b, 'c>(
+    fn eval<'b, 'c>(
         &self,
-        ectx: &mut EvalContext<'a, 'b, 'c>,
-        params: &mut Iterator<Item = LazyValue<'a, 'b>>,
-    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        ectx: &mut EvalContext<'b, 'c>,
+        params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
         let predicate = if let RuntimeValue::Bool(x) = params.next().unwrap().eval(ectx)? {
             x
         } else {
@@ -180,10 +180,70 @@ impl HostFunction for IfOp {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct List {
+    inner_ty: DataType,
+}
+
+impl CustomDataType for List {
+    fn cdt_eq(&self, other: &CustomDataType) -> bool {
+        let other = match other.as_any().downcast_ref::<List>() {
+            Some(v) => v,
+            None => return false,
+        };
+        self.inner_ty == other.inner_ty
+    }
+
+    fn as_any(&self) -> &::std::any::Any {
+        self
+    }
+}
+
+#[derive(Debug)]
+pub struct ListPushOp;
+impl HostFunction for ListPushOp {
+    fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
+        if params.len() == 2 {
+            if params[1] == DataType::Empty {
+                Ok(DataType::Custom(Rc::new(Box::new(List {
+                    inner_ty: params[0].clone(),
+                }))))
+            } else {
+                if let DataType::Custom(ref inner) = params[1] {
+                    if let Some(list) = (**inner).as_any().downcast_ref::<List>() {
+                        if list.inner_ty == params[0] {
+                            Ok(DataType::Custom(Rc::new(Box::new(list.clone()))))
+                        } else {
+                            Err(TypeError::Custom("list type mismatch".into()))
+                        }
+                    } else {
+                        Err(TypeError::Custom("push target not list or empty".into()))
+                    }
+                } else {
+                    Err(TypeError::Custom("push target not list or empty".into()))
+                }
+            }
+        } else {
+            Err(TypeError::Custom("expecting exactly 2 params".into()))
+        }
+    }
+
+    fn eval<'b, 'c>(
+        &self,
+        ectx: &mut EvalContext<'b, 'c>,
+        params: &mut Iterator<Item = LazyValue<'b>>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
+        let val = params.next().unwrap().eval(ectx)?;
+        let list = params.next().unwrap().eval(ectx)?;
+        panic!()
+    }
+}
+
 pub struct HostManager {
     binops: Vec<(&'static str, BasicBinop)>,
     relops: Vec<(&'static str, BasicRelop)>,
     ifop: IfOp,
+    list_push_op: ListPushOp,
 }
 
 impl HostManager {
@@ -305,28 +365,27 @@ impl HostManager {
                 ),
             ],
             ifop: IfOp,
+            list_push_op: ListPushOp,
         }
     }
 
-    pub fn get_binops<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Cow<'static, str>, &'a dyn HostFunction)> {
+    pub fn get_binops(&self) -> impl Iterator<Item = (String, &dyn HostFunction)> {
         self.binops
             .iter()
-            .map(|(k, v)| (Cow::Borrowed(*k), v as &dyn HostFunction))
+            .map(|(k, v)| ((*k).into(), v as &dyn HostFunction))
     }
 
-    pub fn get_relops<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Cow<'static, str>, &'a dyn HostFunction)> {
+    pub fn get_relops(&self) -> impl Iterator<Item = (String, &dyn HostFunction)> {
         self.relops
             .iter()
-            .map(|(k, v)| (Cow::Borrowed(*k), v as &dyn HostFunction))
+            .map(|(k, v)| ((*k).into(), v as &dyn HostFunction))
     }
 
-    pub fn get_ifop<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Cow<'static, str>, &'a dyn HostFunction)> {
-        ::std::iter::once((Cow::Borrowed("if"), &self.ifop as &dyn HostFunction))
+    pub fn get_ifop(&self) -> impl Iterator<Item = (String, &dyn HostFunction)> {
+        ::std::iter::once(("if".into(), &self.ifop as &dyn HostFunction))
+    }
+
+    pub fn get_list_ops(&self) -> impl Iterator<Item = (String, &dyn HostFunction)> {
+        vec![("list_push".into(), &self.list_push_op as &dyn HostFunction)].into_iter()
     }
 }

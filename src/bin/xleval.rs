@@ -28,6 +28,9 @@ fn main() {
     trs.add_hosts(hm.get_relops());
     ectx.add_hosts(hm.get_relops());
 
+    trs.add_hosts(hm.get_list_ops());
+    ectx.add_hosts(hm.get_list_ops());
+
     let ty = x_lang::typeck::check_expr(&ast, &mut trs).unwrap();
     println!("{:?}", ty);
 

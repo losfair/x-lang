@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::error::*;
-use std::borrow::Cow;
 use std::rc::Rc;
 
 pub struct TokenStream<'a> {
@@ -15,6 +14,7 @@ pub enum Token<'a> {
     Lambda,
     Identifier(&'a str),
     HostFunction(&'a str),
+    EmptyLiteral,
     IntLiteral(i64),
     FloatLiteral(f64),
 }
@@ -48,6 +48,7 @@ impl<'a> TokenStream<'a> {
             b'(' => Ok(Token::ExprBegin),
             b')' => Ok(Token::ExprEnd),
             b'\\' => Ok(Token::Lambda),
+            b'~' => Ok(Token::EmptyLiteral),
             b'$' => {
                 let start = self.pos;
                 self.pos = token_end(self.raw, self.pos, |x| {
@@ -100,7 +101,7 @@ impl<'a> TokenStream<'a> {
     }
 }
 
-pub fn parse_expr(input: &str) -> Result<Expr<'static>, ParseError> {
+pub fn parse_expr(input: &str) -> Result<Expr, ParseError> {
     let mut ts = TokenStream::new(input);
     match ts.next_token()? {
         Token::ExprBegin => {
@@ -114,11 +115,9 @@ pub fn parse_expr(input: &str) -> Result<Expr<'static>, ParseError> {
     }
 }
 
-fn _parse_expr<'a>(
-    input: &mut TokenStream<'a>,
-) -> Result<Expr<'static> /* FIXME: lifetime */, ParseError> {
-    let mut apply_target: Option<Expr<'static>> = None;
-    let mut apply_params: Vec<Expr<'static>> = Vec::new();
+fn _parse_expr<'a>(input: &mut TokenStream<'a>) -> Result<Expr, ParseError> {
+    let mut apply_target: Option<Expr> = None;
+    let mut apply_params: Vec<Expr> = Vec::new();
 
     loop {
         let e = match input.next_token()? {
@@ -126,8 +125,11 @@ fn _parse_expr<'a>(
                 body: Rc::new(match id {
                     "true" => ExprBody::Const(ConstExpr::Bool(true)),
                     "false" => ExprBody::Const(ConstExpr::Bool(false)),
-                    _ => ExprBody::Name(Cow::Owned(id.to_owned())),
+                    _ => ExprBody::Name(id.to_string()),
                 }),
+            },
+            Token::EmptyLiteral => Expr {
+                body: Rc::new(ExprBody::Const(ConstExpr::Empty)),
             },
             Token::IntLiteral(v) => Expr {
                 body: Rc::new(ExprBody::Const(ConstExpr::Int(v))),
@@ -138,11 +140,11 @@ fn _parse_expr<'a>(
             Token::ExprBegin => _parse_expr(input)?,
             Token::ExprEnd => break,
             Token::Lambda => {
-                let mut param_names: Vec<Cow<'static, str>> = Vec::new();
+                let mut param_names: Vec<String> = Vec::new();
                 let end_tk = loop {
                     let tk = input.next_token()?;
                     if let Token::Identifier(id) = tk {
-                        param_names.push(Cow::Owned(id.to_owned()));
+                        param_names.push(id.to_string());
                     } else {
                         break tk;
                     }
@@ -161,7 +163,7 @@ fn _parse_expr<'a>(
             Token::HostFunction(name) => Expr {
                 body: Rc::new(ExprBody::Abstract {
                     params: vec![],
-                    body: AbstractBody::Host(Cow::Owned(name.to_owned())),
+                    body: AbstractBody::Host(name.to_string()),
                 }),
             },
         };

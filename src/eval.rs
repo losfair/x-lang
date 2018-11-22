@@ -2,39 +2,39 @@ use crate::ast::*;
 use crate::error::*;
 use crate::host::*;
 use rpds::RedBlackTreeMap;
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
-pub enum RuntimeValue<'a, 'b> {
+pub enum RuntimeValue<'b> {
+    Empty,
     Int(i64),
     Float(f64),
     Bool(bool),
     Function {
-        params: &'b [Cow<'a, str>],
-        body: &'b Expr<'a>,
-        context_values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
+        params: &'b [String],
+        body: &'b Expr,
+        context_values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
     },
-    Host(&'b Cow<'a, str>),
+    Host(&'b String),
 }
 
 #[derive(Clone, Debug)]
-pub struct LazyValue<'a, 'b> {
-    expr: &'b Expr<'a>,
-    context_values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
-    outcome: Rc<RefCell<Option<RuntimeValue<'a, 'b>>>>,
+pub struct LazyValue<'b> {
+    expr: &'b Expr,
+    context_values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
+    outcome: Rc<RefCell<Option<RuntimeValue<'b>>>>,
 }
 
 #[derive(Default)]
-pub struct EvalContext<'a, 'b, 'c> {
-    values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
-    host_functions: HashMap<Cow<'a, str>, &'c dyn HostFunction>,
+pub struct EvalContext<'b, 'c> {
+    values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
+    host_functions: HashMap<String, &'c dyn HostFunction>,
 }
 
-impl<'a, 'b, 'c> EvalContext<'a, 'b, 'c> {
-    pub fn add_hosts<H: IntoIterator<Item = (Cow<'a, str>, &'c dyn HostFunction)>>(
+impl<'b, 'c> EvalContext<'b, 'c> {
+    pub fn add_hosts<H: IntoIterator<Item = (String, &'c dyn HostFunction)>>(
         &mut self,
         host_functions: H,
     ) {
@@ -42,17 +42,17 @@ impl<'a, 'b, 'c> EvalContext<'a, 'b, 'c> {
     }
 }
 
-pub fn eval_expr<'a, 'b, 'c>(
-    e: &'b Expr<'a>,
-    mut ctx: EvalContext<'a, 'b, 'c>,
-) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+pub fn eval_expr<'b, 'c>(
+    e: &'b Expr,
+    mut ctx: EvalContext<'b, 'c>,
+) -> Result<RuntimeValue<'b>, RuntimeError> {
     _eval_expr(e, &mut ctx)
 }
 
-fn _eval_expr<'a, 'b, 'c>(
-    e: &'b Expr<'a>,
-    ctx: &mut EvalContext<'a, 'b, 'c>,
-) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+fn _eval_expr<'b, 'c>(
+    e: &'b Expr,
+    ctx: &mut EvalContext<'b, 'c>,
+) -> Result<RuntimeValue<'b>, RuntimeError> {
     match *e.body {
         ExprBody::Abstract {
             ref params,
@@ -123,10 +123,11 @@ fn _eval_expr<'a, 'b, 'c>(
             ConstExpr::Bool(v) => RuntimeValue::Bool(v),
             ConstExpr::Int(v) => RuntimeValue::Int(v),
             ConstExpr::Float(v) => RuntimeValue::Float(v),
+            ConstExpr::Empty => RuntimeValue::Empty,
         }),
         ExprBody::Match { .. } => unimplemented!(),
         ExprBody::Name(ref name) => {
-            let lv: LazyValue<'a, 'b> =
+            let lv: LazyValue<'b> =
                 ctx.values.get(name).cloned().unwrap_or_else(|| {
                     panic!("bug: name not found: {} {:?}", name, ctx.values.iter())
                 });
@@ -136,11 +137,11 @@ fn _eval_expr<'a, 'b, 'c>(
     }
 }
 
-impl<'a, 'b> LazyValue<'a, 'b> {
+impl<'b> LazyValue<'b> {
     pub fn eval<'c>(
         &self,
-        ctx: &mut EvalContext<'a, 'b, 'c>,
-    ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        ctx: &mut EvalContext<'b, 'c>,
+    ) -> Result<RuntimeValue<'b>, RuntimeError> {
         let mut outcome = self.outcome.borrow_mut(); // a lazy value should never be evaluated recursively
         if let Some(ref oc) = *outcome {
             return Ok(oc.clone());

@@ -133,6 +133,7 @@ pub fn _check_expr<'a, 'b>(
         ExprBody::Const(ref c) => Ok(match *c {
             ConstExpr::Int(_) => DataType::Value(ValueType::Int),
             ConstExpr::Bool(_) => DataType::Value(ValueType::Bool),
+            ConstExpr::Float(_) => DataType::Value(ValueType::Float),
         }),
         ExprBody::Apply {
             ref target,

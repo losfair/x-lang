@@ -3,9 +3,11 @@ use crate::error::*;
 use crate::host::*;
 use rpds::RedBlackTreeMap;
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RuntimeValue<'a, 'b> {
     Int(i64),
     Float(f64),
@@ -22,6 +24,7 @@ pub enum RuntimeValue<'a, 'b> {
 pub struct LazyValue<'a, 'b> {
     expr: &'b Expr<'a>,
     context_values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
+    outcome: Rc<RefCell<Option<RuntimeValue<'a, 'b>>>>,
 }
 
 #[derive(Default)]
@@ -81,6 +84,7 @@ fn _eval_expr<'a, 'b, 'c>(
                             LazyValue {
                                 expr: x,
                                 context_values: ctx.values.clone(),
+                                outcome: Rc::new(RefCell::new(None)),
                             },
                         );
                     });
@@ -97,6 +101,7 @@ fn _eval_expr<'a, 'b, 'c>(
                         .map(|x| LazyValue {
                             expr: x,
                             context_values: ctx.values.clone(),
+                            outcome: Rc::new(RefCell::new(None)),
                         })
                         .collect();
                     let hf = ctx
@@ -117,6 +122,7 @@ fn _eval_expr<'a, 'b, 'c>(
         ExprBody::Const(ref ce) => Ok(match *ce {
             ConstExpr::Bool(v) => RuntimeValue::Bool(v),
             ConstExpr::Int(v) => RuntimeValue::Int(v),
+            ConstExpr::Float(v) => RuntimeValue::Float(v),
         }),
         ExprBody::Match { .. } => unimplemented!(),
         ExprBody::Name(ref name) => {
@@ -135,12 +141,20 @@ impl<'a, 'b> LazyValue<'a, 'b> {
         &self,
         ctx: &mut EvalContext<'a, 'b, 'c>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
+        let mut outcome = self.outcome.borrow_mut(); // a lazy value should never be evaluated recursively
+        if let Some(ref oc) = *outcome {
+            return Ok(oc.clone());
+        }
+
         let mut new_values = self.context_values.clone();
 
         ::std::mem::swap(&mut new_values, &mut ctx.values);
         let ret = _eval_expr(self.expr, ctx);
         ::std::mem::swap(&mut new_values, &mut ctx.values);
 
-        ret
+        let ret = ret?;
+        *outcome = Some(ret.clone());
+
+        Ok(ret)
     }
 }

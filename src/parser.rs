@@ -8,7 +8,7 @@ pub struct TokenStream<'a> {
     pos: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token<'a> {
     ExprBegin,
     ExprEnd,
@@ -16,6 +16,7 @@ pub enum Token<'a> {
     Identifier(&'a str),
     HostFunction(&'a str),
     IntLiteral(i64),
+    FloatLiteral(f64),
 }
 
 fn token_end<F: Fn(u8) -> bool>(raw: &[u8], begin: usize, predicate: F) -> usize {
@@ -73,13 +74,20 @@ impl<'a> TokenStream<'a> {
             }
             x if x.is_ascii_digit() => {
                 let start = self.pos - 1;
-                self.pos = token_end(self.raw, self.pos, |x| !x.is_ascii_digit());
-                Ok(Token::IntLiteral(
-                    ::std::str::from_utf8(&self.raw[start..self.pos])
-                        .map_err(|_| ParseError::InvalidUtf8)?
-                        .parse::<i64>()
-                        .map_err(|_| ParseError::InvalidNumber)?,
-                ))
+                self.pos = token_end(self.raw, self.pos, |x| !x.is_ascii_digit() && x != b'.');
+                Ok(::std::str::from_utf8(&self.raw[start..self.pos])
+                    .map_err(|_| ParseError::InvalidUtf8)
+                    .and_then(|v| {
+                        if v.find(|x| x == '.').is_some() {
+                            v.parse::<f64>()
+                                .map(Token::FloatLiteral)
+                                .map_err(|_| ParseError::InvalidNumber)
+                        } else {
+                            v.parse::<i64>()
+                                .map(Token::IntLiteral)
+                                .map_err(|_| ParseError::InvalidNumber)
+                        }
+                    })?)
             }
             x if x.is_ascii_whitespace() => {
                 self.pos = token_end(self.raw, self.pos, |x| !x.is_ascii_whitespace());
@@ -121,6 +129,9 @@ fn _parse_expr<'a>(input: &mut TokenStream<'a>) -> Result<Expr<'static>, ParseEr
             },
             Token::IntLiteral(v) => Expr {
                 body: Rc::new(ExprBody::Const(ConstExpr::Int(v))),
+            },
+            Token::FloatLiteral(v) => Expr {
+                body: Rc::new(ExprBody::Const(ConstExpr::Float(v))),
             },
             Token::ExprBegin => _parse_expr(input)?,
             Token::ExprEnd => break,

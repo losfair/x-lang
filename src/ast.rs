@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DataType<'a> {
     Value(ValueType),
     Sum(Vec<(Cow<'a, str>, DataType<'a>)>),
@@ -17,13 +17,13 @@ pub enum DataType<'a> {
     Divergent,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Expr<'a> {
     #[serde(flatten)]
     pub body: Rc<ExprBody<'a>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum ExprBody<'a> {
     Const(ConstExpr),
     Name(Cow<'a, str>),
@@ -42,15 +42,16 @@ pub enum ExprBody<'a> {
     Never,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AbstractBody<'a> {
     Host(Cow<'a, str>),
     Expr(Expr<'a>),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum ConstExpr {
     Int(i64),
+    Float(f64),
     Bool(bool),
 }
 

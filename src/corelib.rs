@@ -271,6 +271,38 @@ impl HostManager {
                         bool_op: |a, b| Ok(a || b),
                     },
                 ),
+                (
+                    "lt",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a < b),
+                        float_op: |a, b| Ok(a < b),
+                        bool_op: |a, b| Ok(a < b),
+                    },
+                ),
+                (
+                    "le",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a <= b),
+                        float_op: |a, b| Ok(a <= b),
+                        bool_op: |a, b| Ok(a <= b),
+                    },
+                ),
+                (
+                    "gt",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a > b),
+                        float_op: |a, b| Ok(a > b),
+                        bool_op: |a, b| Ok(a > b),
+                    },
+                ),
+                (
+                    "ge",
+                    BasicRelop {
+                        int_op: |a, b| Ok(a >= b),
+                        float_op: |a, b| Ok(a >= b),
+                        bool_op: |a, b| Ok(a >= b),
+                    },
+                ),
             ],
             ifop: IfOp,
         }

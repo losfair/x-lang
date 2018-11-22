@@ -1,9 +1,9 @@
 use crate::ast::*;
 use crate::error::*;
 use crate::host::*;
+use rpds::RedBlackTreeMap;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum RuntimeValue<'a, 'b> {
@@ -13,7 +13,7 @@ pub enum RuntimeValue<'a, 'b> {
     Function {
         params: &'b [Cow<'a, str>],
         body: &'b Expr<'a>,
-        context_stack: Vec<Rc<HashMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>>>,
+        context_values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
     },
     Host(&'b Cow<'a, str>),
 }
@@ -21,12 +21,12 @@ pub enum RuntimeValue<'a, 'b> {
 #[derive(Clone, Debug)]
 pub struct LazyValue<'a, 'b> {
     expr: &'b Expr<'a>,
-    context_stack: Vec<Rc<HashMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>>>,
+    context_values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
 }
 
 #[derive(Default)]
 pub struct EvalContext<'a, 'b, 'c> {
-    stack: Vec<Rc<HashMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>>>,
+    values: RedBlackTreeMap<&'b Cow<'a, str>, LazyValue<'a, 'b>>,
     host_functions: HashMap<Cow<'a, str>, &'c dyn HostFunction>,
 }
 
@@ -58,7 +58,7 @@ fn _eval_expr<'a, 'b, 'c>(
             AbstractBody::Expr(ref e) => RuntimeValue::Function {
                 params: params,
                 body: e,
-                context_stack: ctx.stack.clone(),
+                context_values: ctx.values.clone(),
             },
             AbstractBody::Host(ref name) => RuntimeValue::Host(name),
         }),
@@ -73,32 +73,21 @@ fn _eval_expr<'a, 'b, 'c>(
                 RuntimeValue::Function {
                     params,
                     body,
-                    mut context_stack,
+                    mut context_values,
                 } => {
-                    let lazy_params_hm: HashMap<
-                        &'b Cow<'a, str>,
-                        LazyValue<'a, 'b>,
-                    > = apply_params
-                        .iter()
-                        .enumerate()
-                        .map(|(i, x)| {
-                            (
-                                &params[i],
-                                LazyValue {
-                                    expr: x,
-                                    context_stack: ctx.stack.clone(),
-                                },
-                            )
-                        })
-                        .collect();
+                    apply_params.iter().enumerate().for_each(|(i, x)| {
+                        context_values = context_values.insert(
+                            &params[i],
+                            LazyValue {
+                                expr: x,
+                                context_values: ctx.values.clone(),
+                            },
+                        );
+                    });
 
-                    ::std::mem::swap(&mut context_stack, &mut ctx.stack);
-                    ctx.stack.push(Rc::new(lazy_params_hm));
-
+                    ::std::mem::swap(&mut context_values, &mut ctx.values);
                     let ret = _eval_expr(body, ctx);
-
-                    ctx.stack.pop().unwrap();
-                    ::std::mem::swap(&mut context_stack, &mut ctx.stack);
+                    ::std::mem::swap(&mut context_values, &mut ctx.values);
 
                     ret
                 }
@@ -107,7 +96,7 @@ fn _eval_expr<'a, 'b, 'c>(
                         .iter()
                         .map(|x| LazyValue {
                             expr: x,
-                            context_stack: ctx.stack.clone(),
+                            context_values: ctx.values.clone(),
                         })
                         .collect();
                     let hf = ctx
@@ -131,17 +120,13 @@ fn _eval_expr<'a, 'b, 'c>(
         }),
         ExprBody::Match { .. } => unimplemented!(),
         ExprBody::Name(ref name) => {
-            let mut lv: Option<LazyValue<'a, 'b>> = None;
-            for frame in ctx.stack.iter().rev() {
-                if let Some(_lv) = frame.get(name) {
-                    lv = Some(_lv.clone());
-                    break;
-                }
-            }
-            let lv = lv.unwrap_or_else(|| panic!("bug: name not found: {} {:?}", name, ctx.stack));
+            let lv: LazyValue<'a, 'b> =
+                ctx.values.get(name).cloned().unwrap_or_else(|| {
+                    panic!("bug: name not found: {} {:?}", name, ctx.values.iter())
+                });
             lv.eval(ctx)
         }
-        _ => panic!(),
+        ExprBody::Never => unreachable!(),
     }
 }
 
@@ -150,11 +135,11 @@ impl<'a, 'b> LazyValue<'a, 'b> {
         &self,
         ctx: &mut EvalContext<'a, 'b, 'c>,
     ) -> Result<RuntimeValue<'a, 'b>, RuntimeError> {
-        let mut new_stack = self.context_stack.clone();
+        let mut new_values = self.context_values.clone();
 
-        ::std::mem::swap(&mut new_stack, &mut ctx.stack); // FIXME: slow
+        ::std::mem::swap(&mut new_values, &mut ctx.values);
         let ret = _eval_expr(self.expr, ctx);
-        ::std::mem::swap(&mut new_stack, &mut ctx.stack);
+        ::std::mem::swap(&mut new_values, &mut ctx.values);
 
         ret
     }

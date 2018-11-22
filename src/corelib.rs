@@ -3,6 +3,8 @@ use crate::builtin::*;
 use crate::error::*;
 use crate::eval::*;
 use crate::host::HostFunction;
+use std::any::Any;
+use std::cell::Cell;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -181,13 +183,31 @@ impl HostFunction for IfOp {
 }
 
 #[derive(Debug, Clone)]
-pub struct List {
+pub struct ListType {
     inner_ty: DataType,
 }
 
-impl CustomDataType for List {
+#[derive(Debug, Clone)]
+pub struct List {
+    head: Rc<ListNode>,
+}
+
+#[derive(Debug)]
+pub struct ListNode {
+    value: SlotRef,
+    head_count: Cell<usize>,
+    next: Option<Rc<ListNode>>,
+}
+
+impl CustomValue for List {
+    fn as_any(&self) -> &Any {
+        self
+    }
+}
+
+impl CustomDataType for ListType {
     fn cdt_eq(&self, other: &CustomDataType) -> bool {
-        let other = match other.as_any().downcast_ref::<List>() {
+        let other = match other.as_any().downcast_ref::<ListType>() {
             Some(v) => v,
             None => return false,
         };
@@ -205,12 +225,12 @@ impl HostFunction for ListPushOp {
     fn typeck(&self, params: &[DataType]) -> Result<DataType, TypeError> {
         if params.len() == 2 {
             if params[1] == DataType::Empty {
-                Ok(DataType::Custom(Rc::new(Box::new(List {
+                Ok(DataType::Custom(Rc::new(Box::new(ListType {
                     inner_ty: params[0].clone(),
                 }))))
             } else {
                 if let DataType::Custom(ref inner) = params[1] {
-                    if let Some(list) = (**inner).as_any().downcast_ref::<List>() {
+                    if let Some(list) = (**inner).as_any().downcast_ref::<ListType>() {
                         if list.inner_ty == params[0] {
                             Ok(DataType::Custom(Rc::new(Box::new(list.clone()))))
                         } else {
@@ -233,9 +253,35 @@ impl HostFunction for ListPushOp {
         ectx: &mut EvalContext<'b, 'c>,
         params: &mut Iterator<Item = LazyValue<'b>>,
     ) -> Result<RuntimeValue<'b>, RuntimeError> {
-        let val = params.next().unwrap().eval(ectx)?;
+        let val = params.next().unwrap();
         let list = params.next().unwrap().eval(ectx)?;
-        panic!()
+
+        match list {
+            RuntimeValue::Empty => Ok(RuntimeValue::Custom(CustomValueBox::new(Box::new(List {
+                head: Rc::new(ListNode {
+                    value: ectx.write_slot(val),
+                    head_count: Cell::new(1),
+                    next: None,
+                }),
+            })))),
+            RuntimeValue::Custom(cv) => {
+                Ok(RuntimeValue::Custom(CustomValueBox::new(Box::new(List {
+                    head: Rc::new(ListNode {
+                        value: ectx.write_slot(val),
+                        head_count: Cell::new(1),
+                        next: Some(
+                            cv.inner
+                                .as_any()
+                                .downcast_ref::<List>()
+                                .unwrap()
+                                .head
+                                .clone(),
+                        ),
+                    }),
+                }))))
+            }
+            _ => unreachable!(),
+        }
     }
 }
 

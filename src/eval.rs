@@ -2,8 +2,11 @@ use crate::ast::*;
 use crate::error::*;
 use crate::host::*;
 use rpds::RedBlackTreeMap;
+use slab::Slab;
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -18,6 +21,32 @@ pub enum RuntimeValue<'b> {
         context_values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
     },
     Host(&'b String),
+    Custom(CustomValueBox),
+}
+
+#[derive(Debug)]
+pub struct CustomValueBox {
+    pub inner: Rc<Box<CustomValue>>,
+}
+
+impl CustomValueBox {
+    pub fn new(inner: Box<CustomValue>) -> CustomValueBox {
+        CustomValueBox {
+            inner: Rc::new(inner),
+        }
+    }
+}
+
+pub trait CustomValue: Debug {
+    fn as_any(&self) -> &Any;
+}
+
+impl Clone for CustomValueBox {
+    fn clone(&self) -> Self {
+        CustomValueBox {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -31,6 +60,12 @@ pub struct LazyValue<'b> {
 pub struct EvalContext<'b, 'c> {
     values: RedBlackTreeMap<&'b String, LazyValue<'b>>,
     host_functions: HashMap<String, &'c dyn HostFunction>,
+    slots: Slab<LazyValue<'b>>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct SlotRef {
+    id: usize,
 }
 
 impl<'b, 'c> EvalContext<'b, 'c> {
@@ -39,6 +74,20 @@ impl<'b, 'c> EvalContext<'b, 'c> {
         host_functions: H,
     ) {
         self.host_functions.extend(host_functions);
+    }
+
+    pub fn write_slot(&mut self, v: LazyValue<'b>) -> SlotRef {
+        SlotRef {
+            id: self.slots.insert(v),
+        }
+    }
+
+    pub fn read_slot(&mut self, r: SlotRef) -> LazyValue<'b> {
+        self.slots[r.id].clone()
+    }
+
+    pub fn release_slot(&mut self, r: SlotRef) {
+        self.slots.remove(r.id);
     }
 }
 

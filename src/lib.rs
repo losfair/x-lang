@@ -3,6 +3,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate bincode;
 extern crate rpds;
+extern crate slab;
 
 pub mod ast;
 pub mod builtin;

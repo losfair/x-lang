@@ -31,6 +31,10 @@ fn main() {
     let ty = x_lang::typeck::check_expr(&ast, &mut trs).unwrap();
     println!("{:?}", ty);
 
+    if ty == x_lang::ast::DataType::Divergent {
+        panic!("error: your program will never terminate");
+    }
+
     let ret = x_lang::eval::eval_expr(&ast, ectx).unwrap();
     println!("{:?}", ret);
 }

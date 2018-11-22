@@ -39,5 +39,5 @@ fn main() {
     }
 
     let ret = x_lang::eval::eval_expr(&ast, &mut ectx).unwrap();
-    println!("{:?} {:?}", ectx, ret);
+    println!("ECTX: {:?}\nVALUE: {:?}", ectx, ret);
 }

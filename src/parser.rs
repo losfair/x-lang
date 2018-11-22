@@ -114,7 +114,9 @@ pub fn parse_expr(input: &str) -> Result<Expr<'static>, ParseError> {
     }
 }
 
-fn _parse_expr<'a>(input: &mut TokenStream<'a>) -> Result<Expr<'static>, ParseError> {
+fn _parse_expr<'a>(
+    input: &mut TokenStream<'a>,
+) -> Result<Expr<'static> /* FIXME: lifetime */, ParseError> {
     let mut apply_target: Option<Expr<'static>> = None;
     let mut apply_params: Vec<Expr<'static>> = Vec::new();
 
